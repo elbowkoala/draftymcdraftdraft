@@ -28,7 +28,7 @@ Ny = 31                    #Number of y-grid
 dx = 1.0 #l_de
 dy = 1.0 #l_de
 L = Nx * dx
-Npt = 10           #Number of cloud particles per grid cell
+Npt = 10000           #Number of cloud particles per grid cell
 #dt = 0.1 #1.0/omega_c
 V0 = 0.0
 #omdt = omega_c * dt
@@ -101,7 +101,7 @@ def Qgrid(part_pos_e, part_pos_p):
         Qgrid[i_e,j_e+1] += q_e*cj_e*(1.0-ci_e)
         Qgrid[i_p,j_p+1] += q_p*(1.0-ci_p)
         Qgrid[i_e+1,j_e+1] += q_e*cj_e*ci_e
-        Qgrid[i_p+1,j_p+1] + q_p*cj_p*ci_p
+        Qgrid[i_p+1,j_p+1] += q_p*cj_p*ci_p
 
     Qgrid[0,:] *= 2.0
     Qgrid[Ny,:] *= 2.0
@@ -221,20 +221,17 @@ def phi(rho):
 def phi_fourier(rho):
     rho_f = np.fft.rfft2(rho)
     phi_f = np.empty_like(rho_f)  
-    ES_energy = np.empty_like(rho_f)
     def W(x):
         y = np.exp(1.0j*2.0*np.pi*(x)/float(Nx+1))
-        return y.real
+        return y
     
     for m in range(len(rho_f)):
         for n in range(len(rho_f[0])):
             phi_f[m,n] = (dx*dy*rho_f[m,n])/(4.0 - W(m+1) - W(-m-1) - W(n+1) - W(-n-1))
             ES_energy = phi_f[m,n] * np.conj(rho_f[m,n])
     phi_i = np.fft.irfft2(phi_f)
-    ES_energy = np.sum(ES_energy)
-    ES_energy = ES_energy.real
- 
-    return phi_i, ES_energy
+   
+    return phi_i
 
     
 #Solve for the Electric Field at grid points using finite differencing of potential
@@ -261,9 +258,6 @@ def Efield(phi):
     #Electric field is defined as the negative of the potential gradient 
     Ex *= -1.0/(dx)
     Ey *= -1.0/(dy)
-    
-    Ex += Ex_ext
-    Ey += Ey_ext
     
     return Ex, Ey
 
@@ -327,25 +321,25 @@ def Epts(Ex,Ey,jcj_e,ici_e, jcj_p, ici_p):
 
 
 
-#plt.ion()
-#fig = plt.figure()
-#ax = fig.add_subplot(111)
-x_phase_e = part_pos_e[:,0]
-v_phase_e = part_vel_e[:,1]
-plt.plot(x_phase_e[0::2], v_phase_e[0::2],'k.')
-plt.xlabel('t',fontsize=15)
-plt.ylabel('Energy',fontsize=15)
-plt.title('E-field Energy',fontsize=30)
+plt.ion()
+fig = plt.figure()
+ax = fig.add_subplot(111)
+#x_phase_e = part_pos_e[:,0]
+#v_phase_e = part_vel_e[:,1]
+#plt.plot(x_phase_e[0::2], v_phase_e[0::2],'k.')
+#plt.xlabel('t',fontsize=15)
+#plt.ylabel('Energy',fontsize=15)
+#plt.title('E-field Energy',fontsize=30)
 
 
 def evolve(final_tstep):
     part_pos_0_e = part_pos_e
-    part_pos_0_e *= 0.5
+    #part_pos_0_e *= 0.5
     part_vel_0_e = part_vel_e
 
     part_pos_0_p = part_pos_p
     part_vel_0_p = part_vel_p
-    part_pos_0_p *= 0.5
+    #part_pos_0_p *= 0.5
     
     t = 0.0
     tstep = 0
@@ -364,12 +358,11 @@ def evolve(final_tstep):
       
         jcj_0_e, ici_0_e, jcj_0_p, ici_0_p, Qgrid_0 = Qgrid(part_pos_0_e, part_pos_0_p)
         rho_0 = Qgrid_0 
-        phi_0, ES_energy_0 = phi_fourier(rho_0)        
+        phi_0 = phi_fourier(rho_0)        
         Efx_0, Efy_0 = Efield(phi_0)
         Epts_0_e, Epts_0_p = Epts(Efx_0, Efy_0, jcj_0_e, ici_0_e, jcj_0_p, ici_0_p)
 
         #Initially have v(t=0), do half time step back for v(-.5dt) for Verlet
-        #Half-step back E-field, half rotation B-field (using theta/2 for rotation)
         if tstep == 0:
             vmax_init = max( qm_e*abs(np.amax(Epts_0_e)), qm_p*abs(np.amax(Epts_0_p)))
             dt = 0.2 * dx / vmax_init
@@ -384,9 +377,22 @@ def evolve(final_tstep):
         part_vel_0_p += dt* qm_p * Epts_0_p
         part_pos_0_p += dt* part_vel_0_p
 
-        part_vel_0_plot_e = part_vel_0_e + 0.5*dt*qm_e*Epts_0_e
-        part_vel_0_plot_p = part_vel_0_p + 0.5*dt*qm_p*Epts_0_p
-   
+        part_vel_0_plot_e = part_vel_0_e - 0.5*dt*qm_e*Epts_0_e
+        part_vel_0_plot_p = part_vel_0_p - 0.5*dt*qm_p*Epts_0_p
+
+        
+        KE_0_e = 0.5*m_e*(part_vel_0_plot_e)**2
+        KE_0_e = np.sum(KE_0_e)
+        KE_0_p = 0.5*m_p*(part_vel_0_plot_p)**2
+        KE_0_p = np.sum(KE_0_p)
+
+        PE_0_e = 0.0
+        for i in range(Ny):
+            for j in range(Nx):
+                PE_0_e += rho_0[i,j]*phi_0[i,j]
+
+        TOTE_0_e = KE_0_e + KE_0_p + dx*dy*PE_0_e
+        
         
         #print "new pos 10",part_pos_0[10,:]
         #print "new vel 10",part_vel_0[10,:]
@@ -394,61 +400,66 @@ def evolve(final_tstep):
         
         for n in range(Npt):
             if part_pos_0_e[n,0] >= (Nx)*dx:
-                #print "2offending n pos:",n,part_pos_0_e[n,:]
                 part_pos_0_e[n,0] -= Nx*dx 
-                #print "2fixed n pos:",n,part_pos_0_e[n,:]
 
             if part_pos_0_e[n,0] <= 0:
-                #print "2offending n pos:",n,part_pos_0_e[n,:]
                 part_pos_0_e[n,0] += Nx*dx
-                #print "2fixed n pos:",n,part_pos_0_e[n,:]
 
             if part_pos_0_e[n,1] >= Ny*dy:
-                #print "2offending n pos:",n,part_pos_0_e[n,:]
                 part_pos_0_e[n,1] -= Ny*dy
-                #print "2fixed n pos:",n,part_pos_0_e[n,:]
 
             if part_pos_0_e[n,1] <= 0:
-                #print "2offending n pos:",n,part_pos_0_e[n,:]
                 part_pos_0_e[n,1] += Ny*dy
-                #print "2fixed n pos:",n,part_pos_0_e[n,:]
-
-
-            if part_pos_0_p[n,0] >= Nx*dx:
-                #print "2offending n pos:",n,part_pos_0_p[n,:]
-                part_pos_0_p[n,0] -= Nx*dx
-                #print "2fixed n pos:",n,part_pos_0_p[n,:]
+        
+            if part_pos_0_p[n,0] >= (Nx)*dx:
+                part_pos_0_p[n,0] -= Nx*dx 
 
             if part_pos_0_p[n,0] <= 0:
-                #print "2offending n pos:",n,part_pos_0_p[n,:]
-                part_pos_0_p[n,0] += Nx*dx 
-                #print "2fixed n pos:",n,part_pos_0_p[n,:]
+                part_pos_0_p[n,0] += Nx*dx
 
-            if part_pos_0_p[n,1] >= (Ny)*dy:
-                #print "2offending n pos:",n,part_pos_0_p[n,:]
+            if part_pos_0_p[n,1] >= Ny*dy:
                 part_pos_0_p[n,1] -= Ny*dy
-                #print "2fixed n pos:",n,part_pos_0_p[n,:]
 
             if part_pos_0_p[n,1] <= 0:
-                #print "2offending n pos:",n,part_pos_0_p[n,:]
                 part_pos_0_p[n,1] += Ny*dy
-                #print "2fixed n pos:",n,part_pos_0_p[n,:]
 
-        plt.plot(t,ES_energy_0,"r.")
-        #del ax.collections[:]
+
+
+        #plt.plot(t,ES_energy_0,"r.")
         #x_phase_e = part_pos_0_e[:,0]
         #v_phase_e = part_vel_0_e[:,1]
         #plt.plot(x_phase_e[0::2], v_phase_e[0::2], "k.")
+
+        if tstep%2 == 0:
+            del ax.collections[:]
+            ax.plot(t, KE_0_e, "ro", label='KE')
+            ax.plot(t, PE_0_e, "go", label='PE')
+            ax.plot(t, TOTE_0_e, "ko", label='Total E')
+            
+            plt.show()    
+
+        if tstep == 1:
+            plt.legend(loc='center left',prop={'size':12},shadow=True)
+            plt.title('Energy vs Time Step')
+            plt.xlabel('Time step')
+            plt.ylabel('Energy (qualitative)')
         
+        #plt.hist(part_vel_0_e, bins=40)
+        #plt.show()
+        #ax.hist2d(part_pos_0_e[:,0], part_vel_0_e[:,0], bins=40)
+        #plt.xlabel('x-position')
+        #plt.ylabel('x-velocity')
+        #plt.title('X-Vx Distribution')
         #plt.show()
         #plt.cla()
         #ax.imshow(Qgrid_0)
         #plt.gca().invert_yaxis()
-        plt.pause(.0001)
-        #ax.plot(part_pos_0[:,0], part_pos_0[:,1], "k.")       
+        #plt.pause(.0001)
+        #ax.plot(part_pos_0_e[:,0], part_pos_0_e[:,1], "r.")
+        #ax.plot(part_pos_0_p[:,0], part_pos_0_p[:,1], "b.")
         #plt.pause(.0001)
         #ax.contour(X,Y,phi_0)
-        #plt.pause(.0001)
+        plt.pause(.0001)
         #ax.quiver(X,Y,Efx_0,Efy_0,color='k')     
          
         
@@ -456,8 +467,7 @@ def evolve(final_tstep):
         #print "next dt:",dt
         t += dt
         tstep += 1
-        if tstep%100==0:
-            print "tstep:",tstep
+        
 
 evolve(1000)
 plt.show()
